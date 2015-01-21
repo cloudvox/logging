@@ -39,39 +39,42 @@ module Logging
 
       # :stopdoc:
 
+      alias instantiate new # the "real" new
+
       # Overrides the new method such that only one Logger will be created
       # for any given logger name.
       #
       def new( *args )
-        return super if args.empty?
+        args.empty? ? super : self[ args.shift ]
+      end
 
+      # Returns a logger instance for the given name.
+      def [](name)
         repo = ::Logging::Repository.instance
-        name = repo.to_key(args.shift)
+        logger = repo[ name = repo.to_key(name) ]
+        return logger unless logger.nil?
 
         @mutex.synchronize do
-          logger = repo[name]
-          if logger.nil?
+          logger = repo[ name ]
+          return logger unless logger.nil? # thread-safe double checking
 
-            master = repo.master_for(name)
-            if master
-              if repo.has_logger?(master)
-                logger = repo[master]
-              else
-                logger = super(master)
-                repo[master] = logger
-                repo.children(master).each {|c| c.__send__(:parent=, logger)}
-              end
-              repo[name] = logger
+          if master = repo.master_for(name)
+            if repo.has_logger?(master)
+              logger = repo[ master ]
             else
-              logger = super(name)
-              repo[name] = logger
-              repo.children(name).each {|c| c.__send__(:parent=, logger)}
+              logger = instantiate(master)
+              repo[ master ] = logger
+              repo.children(master).each {|c| c.__send__(:parent=, logger)}
             end
+            repo[ name ] = logger
+          else
+            logger = instantiate(name)
+            repo[ name ] = logger
+            repo.children(name).each {|c| c.__send__(:parent=, logger)}
           end
           logger
         end
       end
-      alias :[] :new
 
       # This is where the actual logging methods are defined. Two methods
       # are created for each log level. The first is a query method used to
